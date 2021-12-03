@@ -2,12 +2,16 @@ package main
 
 import (
 	"database/sql"
-	"encoding/json"
-	"fmt"
+	"github.com/mateuslima90/transaction-processor/adapter/api"
+	"github.com/mateuslima90/transaction-processor/adapter/grpc/pb"
+	"github.com/mateuslima90/transaction-processor/adapter/grpc/service"
 	"github.com/mateuslima90/transaction-processor/adapter/repository"
-	"github.com/mateuslima90/transaction-processor/usecase/process_transaction"
+	"github.com/mateuslima90/transaction-processor/entity"
 	_ "github.com/mattn/go-sqlite3"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/reflection"
 	"log"
+	"net"
 )
 
 func main() {
@@ -19,18 +23,25 @@ func main() {
 	}
 
 	repo := repository.NewTransactionRepositoryDb(db)
-	usecase := process_transaction.NewProcessTransaction(repo)
+	webserver := api.NewServer()
+	webserver.Repository = repo
+	go webserver.Serve()
+	startGRPCServer(repo)
+}
 
-	input := process_transaction.TransactionDtoInput{
-		ID: "1",
-		AccountID: "1",
-		Amount: 0,
-	}
-	output, err := usecase.Execute(input)
+func startGRPCServer(repo entity.TransactionRepository) {
+	listen, err := net.Listen("tcp", "localhost:50052")
 	if err != nil {
-		fmt.Println(err.Error())
+		log.Fatal(err)
 	}
 
-	outputJson, _ := json.Marshal(output)
-	fmt.Println(string(outputJson))
+	grpcServer := grpc.NewServer()
+	service := service.NewProcessService()
+	service.Repository = repo
+	pb.RegisterTransactionServiceServer(grpcServer, service)
+	reflection.Register(grpcServer)
+
+	if err := grpcServer.Serve(listen); err != nil {
+		log.Fatal(err)
+	}
 }
